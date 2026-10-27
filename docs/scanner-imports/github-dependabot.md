@@ -27,9 +27,10 @@ mv "$out/alerts.tmp" "$out/dependabot.json"
 ```
 
 Use your actual GitHub hostname and replace `OWNER/REPO` in both steps.
-Keep the export outside the checkout. Do not filter to open alerts if you want
-closed, dismissed, or reopened history. `--paginate` follows GitHub's
-`Link` header; `per_page=100` alone fetches only the first page. Keep the
+Keep the export outside the checkout. Leave the state filter unset to include
+alerts that are currently fixed, dismissed, or auto-dismissed. Each record
+describes the alert at export time. `--paginate` follows GitHub's `Link` header
+across all pages. Keep the
 read and conversion as separate commands: a successful `jq` must not hide a
 failed request. A `403` or `404` is not an empty backlog.
 
@@ -54,7 +55,7 @@ not proof that a past export was complete or nothing else is vulnerable.
 | Dependency and manifest path     | Reported package, ecosystem and safe repository-relative manifest path; not a vulnerable line of code.                                                                             |
 | Matched `security_vulnerability` | Vulnerable version range and first patched version, when present. A manifest constraint is not an installed version; the advisory's other affected packages are not findings here. |
 | Advisory identifiers             | GHSA/CVE aliases and vendor evidence, not the source occurrence ID.                                                                                                                |
-| State and timestamps             | GitHub's triage and update history. `dismissed` or `fixed` is not a Codex assessment. Omission from a later selection does not delete an occurrence.                               |
+| State and timestamps             | GitHub's reported state and timestamps at export. `dismissed` or `fixed` is not a Codex assessment. Omission from a later selection does not delete an occurrence.                 |
 
 Read local evidence with `codex-security findings imported ./project --format json`.
 The embedded GHSA is not a disclosure published by the consumer repository.

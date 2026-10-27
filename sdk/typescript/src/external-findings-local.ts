@@ -509,6 +509,7 @@ export async function prepareNormalizedLocalImport(
       for (const native of dependabotEvidenceRepositoryUrls(
         finding.evidence.source_data,
         finding.source_finding_id,
+        finding.evidence.url,
       )) {
         if (
           claimed &&
@@ -521,6 +522,10 @@ export async function prepareNormalizedLocalImport(
       }
     }
   }
+  if (dependabotSources.size > 1)
+    throw new CodexSecurityError(
+      "Select Dependabot alerts from only one GitHub host and repository.",
+    );
   const { repository, options: workbenchOptions } = await localContext(
     options.repository,
     dependencies,

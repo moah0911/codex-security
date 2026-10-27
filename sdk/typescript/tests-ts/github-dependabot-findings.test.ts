@@ -120,6 +120,27 @@ test("does not attribute unrelated advisory packages, ranges, or GHSA aliases", 
   }
 });
 
+test("uses the matched vulnerability package when the dependency omits it", () => {
+  const alert = githubDependabotAlert();
+  const withoutPackage = {
+    ...alert,
+    dependency: { manifest_path: alert.dependency.manifest_path },
+  };
+  for (const target of ["cloud", "local"] as const) {
+    const result = normalizeGitHubDependabotAlerts(
+      [withoutPackage, githubDependabotAlert(2)],
+      target,
+    );
+    expect(result.excluded).toEqual([]);
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings[0]!.evidence.packages![0]).toMatchObject({
+      ...alert.security_vulnerability.package,
+      manifest_path: alert.dependency.manifest_path,
+    });
+    expect(result.findings[0]!.evidence.source_data).toEqual(withoutPackage);
+  }
+});
+
 test.each([
   "file:///etc/passwd",
   "https://example.test/lock",
@@ -303,10 +324,22 @@ test("checks the normalized occurrence ID against the original Dependabot alert"
     expect(() => dependabotEvidenceRepositoryUrls(raw, wrong)).toThrow(
       /source finding ID.*original Dependabot alert/i,
     );
-  for (const unrelated of [importedAlert(), importedAdvisory()])
-    expect(
+  for (const unrelated of [importedAlert(), importedAdvisory()]) {
+    expect(() =>
+      dependabotEvidenceRepositoryUrls(
+        unrelated,
+        finding.source_finding_id,
+        finding.evidence.url,
+      ),
+    ).toThrow(/source family/i);
+
+    expect(() =>
       dependabotEvidenceRepositoryUrls(unrelated, finding.source_finding_id),
+    ).toThrow();
+    expect(
+      dependabotEvidenceRepositoryUrls(unrelated, "unrelated-occurrence"),
     ).toEqual([]);
+  }
 });
 
 test("rejects credential-bearing links, foreign API origins, and repo traversal", () => {
@@ -360,16 +393,19 @@ test("handles unambiguous slurped arrays and rejects incomplete page or record s
       excluded: [],
     });
   const first = alerts[0]!;
+  expect(normalizeGitHubDependabotAlerts([[first], []])).toEqual(
+    normalizeGitHubDependabotAlerts([first]),
+  );
   for (const invalid of [
     null,
     [first, [first]],
     [[first], [null]],
     [[[first]]],
-    [[first], []],
     [first, importedAdvisory()],
     { alerts: [first] },
     { ...first, security_vulnerability: undefined },
-    { ...first, dependency: {} },
+    { ...first, dependency: null },
+    { ...first, dependency: { package: null } },
     {
       ...first,
       dependency: { ...first.dependency, manifest_path: "../other/lock" },
@@ -452,6 +488,24 @@ test("file reader dispatches native lists, selected JSONL and gzip while preserv
       expect.stringContaining("/code-scanning/"),
       expect.stringContaining("/security-advisory/"),
     ]);
+    for (const repository of ["dependabot/alerts", "security/dependabot"]) {
+      const saved = importedAlert();
+      const url = saved.url.replace(saved.repository, repository);
+      await writeFile(
+        file,
+        JSON.stringify({
+          ...saved,
+          repository,
+          url,
+          alert: { ...saved.alert, html_url: url },
+        }),
+      );
+      const codeScanning = await readGitHubFindings(file);
+      expect(codeScanning.excluded).toEqual([]);
+      expect(codeScanning.findings[0]!.source_finding_id).toContain(
+        `/${repository}/code-scanning/12/`,
+      );
+    }
     await writeFile(file, JSON.stringify([importedAlert(), []]));
     const legacyWithMalformedSibling = await readGitHubFindings(file);
     expect(legacyWithMalformedSibling.findings).toHaveLength(1);

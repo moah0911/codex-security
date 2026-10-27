@@ -18,12 +18,42 @@ export function isGitHubDependabotAlert(
       [value["url"], value["html_url"]].some(
         (url) =>
           typeof url === "string" &&
-          /\/(?:dependabot\/alerts|security\/dependabot)\//u.test(url),
+          /^\/(?:[^/]+\/[^/]+\/security\/dependabot|(?:api\/v3\/)?repos\/[^/]+\/[^/]+\/dependabot\/alerts)\/\d+$/iu.test(
+            URL.parse(url)?.pathname ?? "",
+          ),
       ))
   );
 }
 
-function identity(alert: Record<string, unknown>) {
+function webIdentity(url: string) {
+  const match =
+    /^(https?):\/\/([^/?#@\\\s]+)\/([a-z0-9_.-]+)\/([a-z0-9_.-]+)\/security\/dependabot\/([1-9]\d*)$/iu.exec(
+      url,
+    );
+  if (!match || match.slice(3, 5).some((part) => /^\.{1,2}$/u.test(part)))
+    return null;
+  const parsed = URL.parse(url);
+  if (
+    !parsed ||
+    (parsed.protocol === "http:" && isGitHubCloudHost(parsed.hostname))
+  )
+    return null;
+  const host = match[2]!.toLowerCase();
+  const repository = `${match[3]}/${match[4]}`.toLowerCase();
+  const origin = `${parsed.protocol}//${host}`;
+  const number = match[5]!;
+  return {
+    repository,
+    repositoryUrl: `${origin}/${repository}`,
+    sourceId: `${host}/${repository}/dependabot/${number}`,
+    apiBase: isGitHubCloudHost(parsed.hostname)
+      ? `https://api.${host}`
+      : `${origin}/api/v3`,
+    number,
+  };
+}
+
+function checkSourceFamily(alert: Record<string, unknown>) {
   if (
     alert["source"] === "github-code-scanning" ||
     alert["source"] === "github-security-advisory"
@@ -31,29 +61,20 @@ function identity(alert: Record<string, unknown>) {
     throw new Error(
       "Dependabot alert conflicts with its GitHub source family.",
     );
+}
+
+function identity(alert: Record<string, unknown>) {
+  checkSourceFamily(alert);
   const number = alert["number"];
   if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1)
     throw new Error("Dependabot alert number must be a positive safe integer.");
   const url = requiredText(alert["html_url"], "Dependabot html_url");
-  const match =
-    /^https:\/\/([^/?#@\\\s]+)\/([a-z0-9_.-]+)\/([a-z0-9_.-]+)\/security\/dependabot\/([0-9]+)$/iu.exec(
-      url,
-    );
-  if (
-    !match ||
-    match[4] !== String(number) ||
-    match.slice(2, 4).some((part) => /^\.{1,2}$/u.test(part))
-  )
+  const parsed = webIdentity(url);
+  if (!parsed || parsed.number !== String(number))
     throw new Error(
       "Dependabot html_url must identify the repository and alert number.",
     );
-  const host = match[1]!.toLowerCase();
-  const hostname = new URL(url).hostname;
-  const repository = `${match[2]}/${match[3]}`.toLowerCase();
-  const repositoryUrl = `https://${host}/${repository}`;
-  const apiBase = isGitHubCloudHost(hostname)
-    ? `https://api.${host}`
-    : `https://${host}/api/v3`;
+  const { repository, repositoryUrl, sourceId, apiBase } = parsed;
   const apiRepo = `${apiBase}/repos/${repository}`;
   if (
     requiredText(alert["url"], "Dependabot API url").toLowerCase() !==
@@ -74,39 +95,59 @@ function identity(alert: Record<string, unknown>) {
         "Dependabot repository metadata conflicts with its alert URLs.",
       );
   }
-  return {
-    repositoryUrl,
-    sourceId: `${host}/${repository}/dependabot/${number}`,
-    url,
-  };
+  return { repositoryUrl, sourceId, url };
 }
 
 export function dependabotEvidenceRepositoryUrls(
   sourceData: unknown,
   expectedSourceFindingId?: string,
+  projectedUrl?: string | null,
 ): string[] {
-  if (!isGitHubDependabotAlert(sourceData)) return [];
-  const { sourceId, repositoryUrl } = identity(sourceData);
+  const native = isGitHubDependabotAlert(sourceData)
+    ? identity(sourceData)
+    : null;
+  const projected = projectedUrl ? webIdentity(projectedUrl) : null;
+  if (projected && !native && isRecord(sourceData))
+    checkSourceFamily(sourceData);
+  const occurrence = native ?? projected;
+  if (!occurrence) {
+    if (
+      expectedSourceFindingId &&
+      /^[^/]+\/[^/]+\/[^/]+\/dependabot\/[1-9]\d*$/u.test(
+        expectedSourceFindingId,
+      )
+    )
+      throw new CodexSecurityError(
+        "The normalized Dependabot occurrence needs the original alert or its repository alert URL.",
+      );
+    return [];
+  }
   if (
     expectedSourceFindingId !== undefined &&
-    expectedSourceFindingId !== sourceId
+    expectedSourceFindingId !== occurrence.sourceId
   )
     throw new CodexSecurityError(
       "The normalized source finding ID does not match the original Dependabot alert.",
     );
-  return [repositoryUrl];
+  if (
+    native &&
+    projectedUrl != null &&
+    (projected?.sourceId !== native.sourceId ||
+      projected.repositoryUrl !== native.repositoryUrl)
+  )
+    throw new CodexSecurityError(
+      "The normalized alert URL does not match the original Dependabot alert.",
+    );
+  return [occurrence.repositoryUrl];
 }
 
 function selectedAlerts(input: unknown) {
   const selection = Array.isArray(input) ? input : [input];
   let rows: unknown[] = selection;
   if (selection.some(Array.isArray)) {
-    if (
-      !selection.every(Array.isArray) ||
-      (selection.length > 1 && selection.some((page) => page.length === 0))
-    )
+    if (!selection.every(Array.isArray))
       throw new Error(
-        "Dependabot input must not mix alerts, incomplete pages or empty pages in a paginated selection.",
+        "Dependabot input must not mix alert records and page arrays.",
       );
     rows = selection.flat();
   }
@@ -133,14 +174,16 @@ function evidence(alert: Record<string, unknown>, url: string) {
     pkg["ecosystem"],
     "Dependabot package ecosystem",
   );
-  const observed = record(
-    dependency["package"],
-    "Dependabot dependency package",
-  );
-  if (observed["name"] !== name || observed["ecosystem"] !== ecosystem)
-    throw new Error(
-      "Dependabot dependency and matched vulnerability packages disagree.",
+  if ("package" in dependency) {
+    const observed = record(
+      dependency["package"],
+      "Dependabot dependency package",
     );
+    if (observed["name"] !== name || observed["ecosystem"] !== ecosystem)
+      throw new Error(
+        "Dependabot dependency and matched vulnerability packages disagree.",
+      );
+  }
   const rawPath = dependency["manifest_path"];
   const path =
     typeof rawPath === "string" && /^[a-z][a-z\d+.-]*:/iu.test(rawPath)

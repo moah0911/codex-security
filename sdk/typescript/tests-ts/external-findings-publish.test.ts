@@ -285,6 +285,25 @@ test("Dependabot publishes on the existing GitHub provider and rejects foreign r
   await expect(
     prepareNormalizedExternalPublication(native, selection, foreign.deps),
   ).rejects.toThrow(/does not match/i);
+  const projected = structuredClone(native);
+  delete projected.findings[0]!.evidence.source_data;
+  await expect(
+    prepareNormalizedExternalPublication(projected, selection, foreign.deps),
+  ).rejects.toThrow(/does not match/i);
+  expect(
+    (
+      await prepareNormalizedExternalPublication(
+        projected,
+        selection,
+        correct.deps,
+      )
+    ).preview.requests,
+  ).toHaveLength(1);
+  const conflicting = structuredClone(native);
+  conflicting.findings[0]!.evidence.url = githubDependabotAlert(2).html_url;
+  await expect(
+    prepareNormalizedExternalPublication(conflicting, selection, correct.deps),
+  ).rejects.toThrow(/alert URL/i);
   const relabeled = structuredClone(native);
   relabeled.findings[0]!.source_finding_id =
     "github.com/example/other/dependabot/2";

@@ -747,6 +747,7 @@ async function preparePublicationInput(
           ? dependabotEvidenceRepositoryUrls(
               finding.evidence.source_data,
               finding.source_finding_id,
+              finding.evidence.url,
             )
           : []),
       ];

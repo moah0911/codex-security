@@ -7,6 +7,7 @@ import {
   listLocalExternalFindings,
   prepareNormalizedLocalImport,
 } from "../src/external-findings-local.js";
+import { normalizeGitHubDependabotAlerts } from "../src/github-dependabot-findings.js";
 import { localFindingsFixture } from "./external-findings-local-helpers.js";
 import { githubDependabotAlert } from "./support/github-dependabot-fixtures.js";
 
@@ -76,6 +77,10 @@ test("two Dependabot alerts for one advisory retain separate repository historie
     foreign.findings.splice(1);
     foreign.findings[0]!.source_finding_id =
       "github.com/example/other/dependabot/3";
+    foreign.findings[0]!.evidence.url = githubDependabotAlert(
+      3,
+      "example/other",
+    ).html_url;
     foreign.findings[0]!.evidence.source_data = {
       ...githubDependabotAlert(3, "example/other"),
       source: "extra",
@@ -86,6 +91,85 @@ test("two Dependabot alerts for one advisory retain separate repository historie
     expect(await listLocalExternalFindings(options, dependencies)).toEqual(
       records,
     );
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test("normalized local imports bind projected Dependabot occurrences to a single repository", async () => {
+  const fixture = await localFindingsFixture();
+  try {
+    const options = {
+      repository: fixture.repository,
+      provider: "github" as const,
+      sourceKey: "alerts",
+    };
+    const deps = { environment: fixture.environment };
+    const first = normalizeGitHubDependabotAlerts(
+      githubDependabotAlert(1),
+      "local",
+    );
+    const second = normalizeGitHubDependabotAlerts(
+      githubDependabotAlert(2, "example/other"),
+      "local",
+    );
+    delete first.findings[0]!.evidence.source_data;
+    await expect(
+      prepareNormalizedLocalImport(
+        {
+          ...first,
+          read: 2,
+          findings: [...first.findings, ...second.findings],
+        },
+        options,
+        deps,
+      ),
+    ).rejects.toThrow(/one GitHub host and repository/);
+    first.findings[0]!.source_finding_id =
+      second.findings[0]!.source_finding_id;
+    await expect(
+      prepareNormalizedLocalImport(first, options, deps),
+    ).rejects.toThrow(/source finding ID/);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test("binds offline HTTP Enterprise alert URLs without changing the repository scheme", async () => {
+  const repository = "git.example.test/example/project";
+  const fixture = await localFindingsFixture({
+    remote: `http://${repository}`,
+  });
+  try {
+    const alert = githubDependabotAlert(
+      1,
+      "example/project",
+      "git.example.test",
+    );
+    const http = {
+      ...alert,
+      html_url: alert.html_url.replace("https:", "http:"),
+      url: alert.url.replace("https:", "http:"),
+    };
+    const normalized = normalizeGitHubDependabotAlerts(http, "local");
+    const options = {
+      repository: fixture.repository,
+      provider: "github" as const,
+      sourceKey: "alerts",
+    };
+    const deps = { environment: fixture.environment };
+    expect(
+      (await prepareNormalizedLocalImport(normalized, options, deps)).preview
+        .findings[0]!.evidence.url,
+    ).toBe(http.html_url);
+    delete normalized.findings[0]!.evidence.source_data;
+    normalized.findings[0]!.evidence.url = alert.html_url;
+    await expect(
+      prepareNormalizedLocalImport(normalized, options, deps),
+    ).rejects.toThrow(/does not match a configured remote/);
+    expect(() =>
+      normalizeGitHubDependabotAlerts({ ...http, url: alert.url }, "local"),
+    ).toThrow(/API url and html_url/);
   } finally {
     await fixture.dispose();
   }
