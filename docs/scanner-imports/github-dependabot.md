@@ -48,13 +48,13 @@ imports a configured remote must agree with the source. Keep the same source
 key on replay. A REST list array or an intentionally selected alert is evidence,
 not proof that a past export was complete or nothing else is vulnerable.
 
-| GitHub field | Codex Security interpretation |
-| --- | --- |
-| Repository alert URL and number | A source occurrence scoped to host, repository and Dependabot. Two alert numbers referencing the same GHSA remain distinct. |
-| Dependency and manifest path | Reported package, ecosystem and safe repository-relative manifest path; not a vulnerable line of code. |
+| GitHub field                     | Codex Security interpretation                                                                                                                                                      |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repository alert URL and number  | A source occurrence scoped to host, repository and Dependabot. Two alert numbers referencing the same GHSA remain distinct.                                                        |
+| Dependency and manifest path     | Reported package, ecosystem and safe repository-relative manifest path; not a vulnerable line of code.                                                                             |
 | Matched `security_vulnerability` | Vulnerable version range and first patched version, when present. A manifest constraint is not an installed version; the advisory's other affected packages are not findings here. |
-| Advisory identifiers | GHSA/CVE aliases and vendor evidence, not the source occurrence ID. |
-| State and timestamps | GitHub's triage and update history. `dismissed` or `fixed` is not a Codex assessment. Omission from a later selection does not delete an occurrence. |
+| Advisory identifiers             | GHSA/CVE aliases and vendor evidence, not the source occurrence ID.                                                                                                                |
+| State and timestamps             | GitHub's triage and update history. `dismissed` or `fixed` is not a Codex assessment. Omission from a later selection does not delete an occurrence.                               |
 
 Read local evidence with `codex-security findings imported ./project --format json`.
 The embedded GHSA is not a disclosure published by the consumer repository.
