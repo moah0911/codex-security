@@ -125,14 +125,20 @@ test.each([
   "https://example.test/lock",
   "file:outside",
   "git+ssh://example.test/lock",
-])("never projects a URI as a checkout manifest: %s", (manifest_path) => {
-  const raw = githubDependabotAlert();
-  raw.dependency.manifest_path = manifest_path;
-  for (const target of ["local", "cloud"] as const)
-    expect(() => normalizeGitHubDependabotAlerts(raw, target)).toThrow(
-      /repository-relative/i,
-    );
-});
+  ".",
+  "project/.",
+  "project/",
+])(
+  "never projects a URI or directory as a checkout manifest: %s",
+  (manifest_path) => {
+    const raw = githubDependabotAlert();
+    raw.dependency.manifest_path = manifest_path;
+    for (const target of ["local", "cloud"] as const)
+      expect(() => normalizeGitHubDependabotAlerts(raw, target)).toThrow(
+        /repository-relative/i,
+      );
+  },
+);
 
 test.each(["open", "fixed", "dismissed", "auto_dismissed"])(
   "keeps %s as source state even for a withdrawn advisory",

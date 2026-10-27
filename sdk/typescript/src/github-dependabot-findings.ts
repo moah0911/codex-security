@@ -146,9 +146,10 @@ function evidence(alert: Record<string, unknown>, url: string) {
     typeof rawPath === "string" && /^[a-z][a-z\d+.-]*:/iu.test(rawPath)
       ? null
       : relativePath(rawPath);
-  if (rawPath != null && !path)
+  const filename = path?.split("/").at(-1);
+  if (rawPath != null && (!filename || filename === "."))
     throw new Error(
-      "Dependabot manifest_path must be a repository-relative path.",
+      "Dependabot manifest_path must identify a repository-relative file.",
     );
   const ghsa = requiredText(advisory["ghsa_id"], "Dependabot GHSA ID");
   if (!/^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/iu.test(ghsa))
