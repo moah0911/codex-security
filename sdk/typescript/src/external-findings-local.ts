@@ -493,6 +493,7 @@ export async function prepareNormalizedLocalImport(
   requireIdentity(options.sourceKey, "Source key");
   const current = structuredClone(input);
   validateExternalReport(current.report);
+  const dependabotSources = new Set<string>();
   const identities = new Set<string>();
   for (const finding of current.findings) {
     requireIdentity(finding.source_finding_id, "Source finding id");
@@ -503,26 +504,30 @@ export async function prepareNormalizedLocalImport(
     identities.add(finding.source_finding_id);
     if (!isRecord(finding.evidence))
       throw new CodexSecurityError("Imported evidence must be an object.");
+    if (options.provider === "github") {
+      const claimed = finding.evidence.details?.repository?.url;
+      for (const native of dependabotEvidenceRepositoryUrls(
+        finding.evidence.source_data,
+        finding.source_finding_id,
+      )) {
+        if (
+          claimed &&
+          cloudRepositoryUrlKey(claimed) !== cloudRepositoryUrlKey(native)
+        )
+          throw new CodexSecurityError(
+            "The normalized repository does not match the original Dependabot alert.",
+          );
+        dependabotSources.add(native);
+      }
+    }
   }
   const { repository, options: workbenchOptions } = await localContext(
     options.repository,
     dependencies,
   );
   const sources = new Map<string, ExternalSourceRepository>();
-  for (const { evidence, source_finding_id: sourceId } of current.findings) {
+  for (const { evidence } of current.findings) {
     const url = evidence.details?.repository?.url;
-    if (options.provider === "github") {
-      for (const native of dependabotEvidenceRepositoryUrls(
-        evidence.source_data,
-        sourceId,
-      )) {
-        if (url && cloudRepositoryUrlKey(url) !== cloudRepositoryUrlKey(native))
-          throw new CodexSecurityError(
-            "The normalized repository does not match the original Dependabot alert.",
-          );
-        sources.set(native, { url: native, platform: "github" });
-      }
-    }
     if (url) sources.set(url, { url });
   }
   for (const source of dependencies.sourceRepositories ?? []) {
@@ -530,6 +535,8 @@ export async function prepareNormalizedLocalImport(
     if (sources.get(source.url)?.platform !== "github")
       sources.set(source.url, source);
   }
+  for (const url of dependabotSources)
+    sources.set(url, { url, platform: "github" });
   await requireMatchingRepository(
     repository,
     options.provider,

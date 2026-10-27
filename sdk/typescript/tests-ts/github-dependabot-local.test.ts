@@ -56,7 +56,10 @@ test("two Dependabot alerts for one advisory retain separate repository historie
       prepare([githubDependabotAlert(3, "example/other")]),
     ).rejects.toThrow(/remote|repository/i);
     const altered = structuredClone(saved.preview);
-    altered.findings[0]!.evidence.details = { kind: "sast", repository: { url: "https://github.com/example/other" } };
+    altered.findings[0]!.evidence.details = {
+      kind: "sast",
+      repository: { url: "https://github.com/example/other" },
+    };
     await expect(
       prepareNormalizedLocalImport(altered, options, dependencies),
     ).rejects.toThrow(/original Dependabot alert/i);
