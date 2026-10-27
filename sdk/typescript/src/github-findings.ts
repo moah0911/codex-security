@@ -5,6 +5,10 @@ import { validateExternalEvidence } from "./external-import-contract.js";
 import type { ExternalFinding, ExternalFindings } from "./external-findings.js";
 import type { ImportedGitHubCodeScanningAlert } from "./github.js";
 import type { ImportedGitHubAdvisory } from "./github-advisories.js";
+import {
+  isGitHubDependabotAlert,
+  normalizeGitHubDependabotAlerts,
+} from "./github-dependabot-findings.js";
 import { parseJsonOrJsonl, readScannerText, text } from "./scanner-import.js";
 
 function object(value: unknown): Record<string, unknown> | undefined {
@@ -324,10 +328,17 @@ export async function readGitHubFindings(
 ): Promise<ExternalFindings> {
   try {
     const payload = parseJsonOrJsonl(await readScannerText(path));
-    return normalizeRecords(
-      Array.isArray(payload) ? payload : [payload],
-      target,
-    );
+    const rows = Array.isArray(payload) ? payload : [payload];
+    if (
+      (rows.length > 0 && rows.every(Array.isArray)) ||
+      rows.some((row) =>
+        Array.isArray(row)
+          ? row.some(isGitHubDependabotAlert)
+          : isGitHubDependabotAlert(row),
+      )
+    )
+      return normalizeGitHubDependabotAlerts(payload, target);
+    return normalizeRecords(rows, target);
   } catch (cause) {
     throw new CodexSecurityError(
       `Could not read GitHub findings as UTF-8 JSON or JSONL: ${errorMessage(cause)}`,

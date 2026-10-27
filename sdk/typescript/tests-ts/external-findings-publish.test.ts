@@ -39,6 +39,7 @@ import type {
 } from "../src/external-import-models.js";
 import { main } from "../src/cli.js";
 import { dependencies } from "./cli-fixtures.js";
+import { githubDependabotAlert } from "./support/github-dependabot-fixtures.js";
 import {
   importedAlert,
   importedAdvisory,
@@ -252,6 +253,35 @@ test("a Wiz Raw Event export explains the finding-report path before contacting 
     }),
   ).rejects.toThrow("scan metadata rather than vulnerability records");
   expect(contactedCloud).toBe(false);
+});
+
+test("Dependabot publishes on the existing GitHub provider and rejects foreign repositories before POST", async () => {
+  const input = githubDependabotAlert();
+  const correct = await fixture([input]);
+  const selection = {
+    ...options,
+    provider: "github" as const,
+    sourceKey: "github.com/example/project/dependabot",
+  };
+  const first = await prepareExternalPublication(
+    correct.file,
+    selection,
+    correct.deps,
+  );
+  expect(first.preview.requests[0]!.source.provider).toBe("github");
+  expect(correct.posts).toHaveLength(0);
+  expect((await first.publish()).counts.created).toBe(1);
+  const replay = await prepareExternalPublication(
+    correct.file,
+    selection,
+    correct.deps,
+  );
+  expect((await replay.publish()).counts.unchanged).toBe(1);
+  const foreign = await fixture([input], "https://github.com/example/other");
+  await expect(
+    prepareExternalPublication(foreign.file, selection, foreign.deps),
+  ).rejects.toThrow(/does not match/i);
+  expect(foreign.posts).toHaveLength(0);
 });
 
 async function fixture(

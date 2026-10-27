@@ -22,6 +22,7 @@ import type {
 } from "./external-import-models.js";
 import { parseGitRemote } from "./git-remote.js";
 import { isRecord } from "./record.js";
+import { dependabotEvidenceRepositoryUrls } from "./github-dependabot-findings.js";
 import {
   bundledPluginRoot,
   canonicalConfigPath,
@@ -508,8 +509,20 @@ export async function prepareNormalizedLocalImport(
     dependencies,
   );
   const sources = new Map<string, ExternalSourceRepository>();
-  for (const { evidence } of current.findings) {
+  for (const { evidence, source_finding_id: sourceId } of current.findings) {
     const url = evidence.details?.repository?.url;
+    if (options.provider === "github") {
+      for (const native of dependabotEvidenceRepositoryUrls(
+        evidence.source_data,
+        sourceId,
+      )) {
+        if (url && cloudRepositoryUrlKey(url) !== cloudRepositoryUrlKey(native))
+          throw new CodexSecurityError(
+            "The normalized repository does not match the original Dependabot alert.",
+          );
+        sources.set(native, { url: native, platform: "github" });
+      }
+    }
     if (url) sources.set(url, { url });
   }
   for (const source of dependencies.sourceRepositories ?? []) {

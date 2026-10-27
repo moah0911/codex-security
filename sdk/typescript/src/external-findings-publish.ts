@@ -32,6 +32,7 @@ import {
 } from "./external-findings-read.js";
 import { canonicalJson } from "./record.js";
 import { wizCsvRepositoryUrl } from "./wiz-csv.js";
+import { dependabotEvidenceRepositoryUrls } from "./github-dependabot-findings.js";
 import { snykRepositoryUrls } from "./snyk-findings.js";
 import { endorRepositoryUrls } from "./endor-findings.js";
 import type {
@@ -741,6 +742,12 @@ async function preparePublicationInput(
           : []),
         ...(options.provider === "endor"
           ? endorRepositoryUrls(finding.evidence.source_data)
+          : []),
+        ...(options.provider === "github"
+          ? dependabotEvidenceRepositoryUrls(
+              finding.evidence.source_data,
+              finding.source_finding_id,
+            )
           : []),
       ];
       for (const sourceRepository of sourceRepositories)
