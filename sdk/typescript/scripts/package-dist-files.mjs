@@ -71,6 +71,7 @@ const distModules = [
   "git-remote",
   "github",
   "github-advisories",
+  "github-dependabot-findings",
   "github-findings",
   "host-records-protocol",
   "index",
