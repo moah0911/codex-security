@@ -26,7 +26,7 @@ test("two Dependabot alerts for one advisory retain separate repository historie
       await writeFile(path, gzipSync(JSON.stringify(findings)));
       return prepareLocalExternalImport(path, options, dependencies);
     };
-    const first = githubDependabotAlert(1);
+    const first = { ...githubDependabotAlert(1), source: "extra" };
     const second = githubDependabotAlert(2);
     const saved = await prepare([first, second]);
     expect((await saved.import()).counts.created).toBe(2);
@@ -53,7 +53,9 @@ test("two Dependabot alerts for one advisory retain separate repository historie
       records.every(({ assessment }) => assessment.state === "not_assessed"),
     ).toBe(true);
     await expect(
-      prepare([githubDependabotAlert(3, "example/other")]),
+      prepare([
+        { ...githubDependabotAlert(3, "example/other"), source: "extra" },
+      ]),
     ).rejects.toThrow(/remote|repository/i);
     const altered = structuredClone(saved.preview);
     altered.findings[0]!.evidence.details = {
@@ -70,6 +72,20 @@ test("two Dependabot alerts for one advisory retain separate repository historie
     await expect(
       prepareNormalizedLocalImport(relabeled, options, dependencies),
     ).rejects.toThrow(/occurrence|source finding|identity|alert ID/i);
+    const foreign = structuredClone(saved.preview);
+    foreign.findings.splice(1);
+    foreign.findings[0]!.source_finding_id =
+      "github.com/example/other/dependabot/3";
+    foreign.findings[0]!.evidence.source_data = {
+      ...githubDependabotAlert(3, "example/other"),
+      source: "extra",
+    };
+    await expect(
+      prepareNormalizedLocalImport(foreign, options, dependencies),
+    ).rejects.toThrow(/remote|repository/i);
+    expect(await listLocalExternalFindings(options, dependencies)).toEqual(
+      records,
+    );
   } finally {
     await fixture.dispose();
   }

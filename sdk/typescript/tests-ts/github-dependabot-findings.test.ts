@@ -59,6 +59,79 @@ test("matches the affected dependency, retains the original alert, and never inv
   expect(finding.evidence).not.toHaveProperty("details");
   expect(finding.evidence).not.toHaveProperty("assessment");
   expect(alert).toEqual(original);
+  alert.dependency.package.name = "changed-after-normalization";
+  alert.security_advisory.identifiers.length = 0;
+  expect(finding.evidence.source_data).toEqual(original);
+});
+
+test("extra metadata cannot hide a native alert or contradict its family", () => {
+  const raw = { ...githubDependabotAlert(), source: "extra" };
+  for (const target of ["local", "cloud"] as const) {
+    const occurrence = normalizeGitHubDependabotAlerts(raw, target)
+      .findings[0]!;
+    expect(occurrence.evidence.source_data).toEqual(raw);
+    expect(
+      dependabotEvidenceRepositoryUrls(raw, occurrence.source_finding_id),
+    ).toEqual(["https://github.com/example/project"]);
+    expect(() => dependabotEvidenceRepositoryUrls(raw, "forged")).toThrow(
+      /source finding ID/i,
+    );
+    for (const source of ["github-code-scanning", "github-security-advisory"]) {
+      const contradictory = { ...raw, source };
+      expect(() =>
+        normalizeGitHubDependabotAlerts(contradictory, target),
+      ).toThrow(/family/i);
+      expect(() => dependabotEvidenceRepositoryUrls(contradictory)).toThrow(
+        /family/i,
+      );
+    }
+  }
+});
+
+test("does not attribute unrelated advisory packages, ranges, or GHSA aliases", () => {
+  const alert = githubDependabotAlert();
+  const native = alert.security_advisory;
+  const match = alert.security_vulnerability;
+  for (const changed of [
+    { vulnerabilities: [] },
+    {
+      vulnerabilities: [
+        { ...match, package: { ...match.package, name: "different" } },
+      ],
+    },
+    {
+      vulnerabilities: [
+        { ...match, package: { ...match.package, ecosystem: "pip" } },
+      ],
+    },
+    { vulnerabilities: [{ ...match, vulnerable_version_range: ">= 10.0" }] },
+    { identifiers: [{ type: "GHSA", value: "GHSA-2222-3333-4444" }] },
+  ]) {
+    for (const target of ["cloud", "local"] as const)
+      expect(() =>
+        normalizeGitHubDependabotAlerts(
+          {
+            ...alert,
+            security_advisory: { ...native, ...changed },
+          },
+          target,
+        ),
+      ).toThrow(/advisory/i);
+  }
+});
+
+test.each([
+  "file:///etc/passwd",
+  "https://example.test/lock",
+  "file:outside",
+  "git+ssh://example.test/lock",
+])("never projects a URI as a checkout manifest: %s", (manifest_path) => {
+  const raw = githubDependabotAlert();
+  raw.dependency.manifest_path = manifest_path;
+  for (const target of ["local", "cloud"] as const)
+    expect(() => normalizeGitHubDependabotAlerts(raw, target)).toThrow(
+      /repository-relative/i,
+    );
 });
 
 test.each(["open", "fixed", "dismissed", "auto_dismissed"])(

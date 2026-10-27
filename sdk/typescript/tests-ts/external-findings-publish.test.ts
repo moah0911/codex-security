@@ -256,7 +256,7 @@ test("a Wiz Raw Event export explains the finding-report path before contacting 
 });
 
 test("Dependabot publishes on the existing GitHub provider and rejects foreign repositories before POST", async () => {
-  const input = githubDependabotAlert();
+  const input = { ...githubDependabotAlert(), source: "extra" };
   const correct = await fixture([input]);
   const selection = {
     ...options,
@@ -281,6 +281,16 @@ test("Dependabot publishes on the existing GitHub provider and rejects foreign r
   await expect(
     prepareExternalPublication(foreign.file, selection, foreign.deps),
   ).rejects.toThrow(/does not match/i);
+  const native = await readGitHubFindings(correct.file);
+  await expect(
+    prepareNormalizedExternalPublication(native, selection, foreign.deps),
+  ).rejects.toThrow(/does not match/i);
+  const relabeled = structuredClone(native);
+  relabeled.findings[0]!.source_finding_id =
+    "github.com/example/other/dependabot/2";
+  await expect(
+    prepareNormalizedExternalPublication(relabeled, selection, foreign.deps),
+  ).rejects.toThrow(/source finding ID/i);
   expect(foreign.posts).toHaveLength(0);
 });
 

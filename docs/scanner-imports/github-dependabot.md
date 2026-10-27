@@ -60,6 +60,8 @@ Read local evidence with `codex-security findings imported ./project --format js
 The embedded GHSA is not a disclosure published by the consumer repository.
 The importer keeps its source status and advisory details in the native alert
 instead of classifying the alert itself as a repository-published advisory.
+It rejects conflicting alert identities, advisory packages or ranges, and
+manifest URIs; an additional vendor field cannot override the native source.
 For large repositories, keep the export for replay and do not combine multiple
 repositories under one source key or destination.
 

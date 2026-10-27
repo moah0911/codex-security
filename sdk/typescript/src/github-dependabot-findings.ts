@@ -13,7 +13,6 @@ export function isGitHubDependabotAlert(
 ): value is Record<string, unknown> {
   return (
     isRecord(value) &&
-    !("source" in value) &&
     ("security_vulnerability" in value ||
       ("dependency" in value && "security_advisory" in value) ||
       [value["url"], value["html_url"]].some(
@@ -25,6 +24,13 @@ export function isGitHubDependabotAlert(
 }
 
 function identity(alert: Record<string, unknown>) {
+  if (
+    alert["source"] === "github-code-scanning" ||
+    alert["source"] === "github-security-advisory"
+  )
+    throw new Error(
+      "Dependabot alert conflicts with its GitHub source family.",
+    );
   const number = alert["number"];
   if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1)
     throw new Error("Dependabot alert number must be a positive safe integer.");
@@ -135,14 +141,37 @@ function evidence(alert: Record<string, unknown>, url: string) {
     throw new Error(
       "Dependabot dependency and matched vulnerability packages disagree.",
     );
-  const path = relativePath(dependency["manifest_path"]);
-  if (dependency["manifest_path"] != null && !path)
+  const rawPath = dependency["manifest_path"];
+  const path =
+    typeof rawPath === "string" && /^[a-z][a-z\d+.-]*:/iu.test(rawPath)
+      ? null
+      : relativePath(rawPath);
+  if (rawPath != null && !path)
     throw new Error(
       "Dependabot manifest_path must be a repository-relative path.",
     );
   const ghsa = requiredText(advisory["ghsa_id"], "Dependabot GHSA ID");
   if (!/^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/iu.test(ghsa))
     throw new Error("Dependabot security_advisory must identify a GHSA.");
+  const range = requiredText(
+    vulnerability["vulnerable_version_range"],
+    "Dependabot matched vulnerable version range",
+  );
+  const affected = advisory["vulnerabilities"];
+  if (
+    !Array.isArray(affected) ||
+    !affected.some(
+      (entry) =>
+        isRecord(entry) &&
+        isRecord(entry["package"]) &&
+        entry["package"]["name"] === name &&
+        entry["package"]["ecosystem"] === ecosystem &&
+        entry["vulnerable_version_range"] === range,
+    )
+  )
+    throw new Error(
+      "Dependabot advisory does not cover the matched package and vulnerable range.",
+    );
   const state = alert["state"];
   if (
     typeof state !== "string" ||
@@ -175,6 +204,14 @@ function evidence(alert: Record<string, unknown>, url: string) {
   const aliases = Array.isArray(advisory["identifiers"])
     ? advisory["identifiers"].flatMap((item) => {
         const value = isRecord(item) ? text(item["value"]) : null;
+        if (
+          value &&
+          (item["type"] === "GHSA" || /^GHSA-/iu.test(value)) &&
+          value.toUpperCase() !== ghsa.toUpperCase()
+        )
+          throw new Error(
+            "Dependabot advisory identifiers disagree on the GHSA.",
+          );
         return value === null ? [] : [value];
       })
     : [];
@@ -195,16 +232,13 @@ function evidence(alert: Record<string, unknown>, url: string) {
         name,
         ecosystem,
         manifest_path: path,
-        vulnerable_version_range: requiredText(
-          vulnerability["vulnerable_version_range"],
-          "Dependabot matched vulnerable version range",
-        ),
+        vulnerable_version_range: range,
         fixed_versions: fixed,
       },
     ],
     locations: path ? [{ path }] : [],
     source_updated_at: Math.floor(updated),
-    source_data: alert,
+    source_data: structuredClone(alert),
   };
 }
 
