@@ -5,9 +5,9 @@ Linux amd64. [melange](https://github.com/chainguard-dev/melange) creates
 the scanner APK; [apko](https://github.com/chainguard-dev/apko) assembles it
 with packages from the [public Wolfi repository](https://github.com/wolfi-dev/os).
 The image uses the same entrypoint, UID/GID 10001, and `/input`, `/output`, and
-`/state` directories as the [published scanner](../README.md). It is a local
-alternative to that image. It does not build unreleased changes in this checkout
-or publish tags to a registry.
+`/state` directories as the [published scanner](../README.md). The local build
+packages the pinned npm release. To publish it, use the separate
+[amd64 release workflow](#publish-the-amd64-variant).
 
 ## Build and inspect
 
@@ -66,6 +66,28 @@ artifact and SARIF output, saved history, and a model turn against a loopback
 fixture. It also checks that a sandboxed child can read the test repository but
 cannot modify it. A real scan needs a compatible model endpoint; the image
 does not include a model.
+
+## Publish the amd64 variant
+
+Changes to this recipe build and run the native smoke test on pull requests.
+Publishing is a separate manual run. After the workflow is on protected
+`main`, a maintainer can start it with:
+
+```sh
+gh workflow run publish-wolfi.yml --repo openai/codex-security --ref main
+```
+
+Approve the pending `container` deployment in GitHub Actions after the build
+and smoke test pass. The workflow publishes the tested platform digest, checks
+an anonymous pull, and attaches build provenance and the SPDX inventory. Its
+only release tag is the versioned Wolfi tag, such as
+`ghcr.io/openai/codex-security:0.7.0-wolfi-amd64`. The run summary includes
+the digest for a pinned pull. The normal release tags keep their existing
+platforms and release process.
+
+Retries cannot replace a versioned tag with a different digest. To retry a
+failed publication using the same build, rerun the failed job within the
+seven-day artifact retention period.
 
 ## Inputs and updates
 
