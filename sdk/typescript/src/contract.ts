@@ -64,6 +64,12 @@ export interface LoadedContract {
   review: NonNullable<ScanManifest["scan"]["review"]>;
 }
 
+// A hosted receipt must hash the same document bytes that validated successfully.
+export const validatedDocumentDigests = new WeakMap<
+  ScanManifest,
+  ReadonlyMap<string, string>
+>();
+
 export class ContractSchemaError extends ContractValidationError {}
 
 export const SEALED_DEFERRED_PATH_RULE = "invalidSealedDeferredPath";
@@ -209,6 +215,7 @@ export async function loadContractWithScanDirectory(
     );
   }
   await verifyScanRoot(scanRoot, options.signal);
+  validatedDocumentDigests.set(manifest, documentDigests);
   return {
     contract: { manifest, findings, review, mode },
     scanDirectory: scanRoot.path,
