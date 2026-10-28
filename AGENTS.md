@@ -89,11 +89,9 @@ variables, and defaults as public API.
 
 ## Published documentation
 
-When a change affects how developers use the CLI, SDK, or plugin, update the
-relevant docs and examples in this repository. If the
-[published Codex Security docs](https://learn.chatgpt.com/docs/security) also
-need an update, you can name the affected page or workflow in the pull request
-and describe what should change. Maintainers handle website updates.
+For changes to how developers use the CLI, SDK, or plugin, update the affected
+docs and examples in this repository. Maintainers update the [published docs](https://learn.chatgpt.com/docs/security).
+To suggest a website edit, name the page or workflow and describe the change in your PR.
 
 ## Pull request labels
 
