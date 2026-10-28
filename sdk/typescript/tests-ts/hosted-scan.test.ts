@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import { PassThrough, Writable } from "node:stream";
 import {
   appendFile,
@@ -389,9 +389,7 @@ test.each(sealedScopes)(
     if (normalized.length > 1) expect(report).not.toContain("service-c");
     for (const artifact of result.artifacts) {
       const data = await readFile(join(result.outputDirectory, artifact.path));
-      expect(artifact.sha256).toBe(
-        createHash("sha256").update(data).digest("hex"),
-      );
+      expect(artifact.sha256).toBe(hash("sha256", data));
       expect(artifact.bytes).toBe(data.byteLength);
     }
     const artifactPaths = result.artifacts.map((artifact) => artifact.path);
@@ -624,34 +622,33 @@ test.each(["scan-manifest.json", "findings.json", "artifacts/evidence.txt"])(
   "changed bytes in %s cannot produce a completed hosted receipt",
   async (path) => {
     const original = CodexSecurity.prototype.run;
-    const swap = spyOn(CodexSecurity.prototype, "run").mockImplementation(
+    using _swap = spyOn(CodexSecurity.prototype, "run").mockImplementation(
       async function (this: CodexSecurity, ...args) {
         const validated = await original.apply(this, args);
         await appendFile(join(validated.scanDir, path), "\n");
         return validated;
       },
     );
-    try {
-      const result = await runHostedScan(await fixture(), {
-        executor: {
-          async run(request) {
-            const evidence = "artifacts/evidence.txt";
-            writeSource(
-              request.runtime.outputDirectory,
-              evidence,
-              "scan evidence",
-            );
-            await writeDraft(request, [evidence]);
-            return receipt(request);
-          },
+    const result = await runHostedScan(await fixture(), {
+      executor: {
+        async run(request) {
+          const evidence = "artifacts/evidence.txt";
+          writeSource(
+            request.runtime.outputDirectory,
+            evidence,
+            "scan evidence",
+          );
+          await writeDraft(request, [evidence]);
+          return receipt(request);
         },
-      });
-      expect(result.status).toBe("failed");
-      expect(result.artifacts).toEqual([]);
-      expect(result).toHaveProperty("error", expect.stringContaining(path));
-    } finally {
-      swap.mockRestore();
-    }
+      },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.artifacts).toEqual([]);
+    expect(result).toHaveProperty(
+      "error",
+      `The sealed file ${path} changed before the hosted receipt was created.`,
+    );
   },
 );
 
@@ -693,9 +690,7 @@ test("hosted receipts hash MCP checkpoints as written", async () => {
   const contents = await readFile(
     join(input.outputDirectory, checkpoint!.path),
   );
-  expect(checkpoint!.sha256).toBe(
-    createHash("sha256").update(contents).digest("hex"),
-  );
+  expect(checkpoint!.sha256).toBe(hash("sha256", contents));
 });
 
 test("a changed checkout cannot produce accepted completed output", async () => {
