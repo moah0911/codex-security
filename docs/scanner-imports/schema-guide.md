@@ -27,6 +27,7 @@ to investigate records together, not instructions to merge them.
 | [Semgrep Code CLI/CI JSON or SARIF](semgrep.md)                                                                                                                                                     | Fingerprint; otherwise rule, literal path and start/end lines and columns                                                                               | Organization, project and branch           |
 | [GitHub saved `import github` output](../../sdk/typescript/docs/cli.md#import-github-findings-locally-or-to-cloud)                                                                                  | Host, repository, alert number and hash of selected ref                                                                                                 | Host, repository and code-scanning family  |
 | [GitHub saved `import github-advisories` output](../../sdk/typescript/docs/cli.md#import-ghsa-advisories-separately)                                                                                | Host, repository **or** global scope, and GHSA ID                                                                                                       | Separate advisory stream from alerts       |
+| [GitHub Dependabot repository REST alerts](github-dependabot.md)                                                                                                                                    | Host, repository and alert number                                                                                                                       | Host, repository and Dependabot family     |
 
 Within **one input**, duplicate IDs are ambiguous, not corroboration. Wiz and
 GitHub reject a selection with duplicate accepted IDs. Endor, Snyk and Semgrep
@@ -83,8 +84,11 @@ before preparing a fresh submission.
   instance state. For GHSA, a repository disclosure identifies its publisher; a
   global disclosure has no source repository. Both can carry CVE aliases,
   affected ranges and patched versions. Neither proves installation or
-  applicability. Raw API pages, Dependabot and secret-scanning alerts are not
-  these saved inputs.
+  applicability. Both readers require saved collector output.
+- **GitHub Dependabot.** Native repository alerts identify the matched package,
+  manifest and vulnerable range. The embedded advisory supplies advisory IDs.
+  Each alert number has its own history, including when several alerts cite the
+  same GHSA. GitHub secret-scanning alerts remain outside the file reader.
 
 ## Read the right field
 
