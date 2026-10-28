@@ -44,9 +44,11 @@ codex-security publish findings "$out/dependabot.json" \
 ```
 
 Review the destination, ready records and exclusions, then remove `--dry-run`.
-For Cloud use an authorized repository ID or URL with `--to cloud`. For local
-imports a configured remote must agree with the source. Keep the same source
-key on replay. A REST list array or an intentionally selected alert is evidence,
+For Cloud use an authorized repository ID or URL with `--to cloud`. For a local
+checkout with recognizable network remotes, the alert repository must match one
+of them. If the checkout has no such remote (for example, it uses only filesystem
+paths or `file://` URLs), verify that the export belongs to the checkout before
+importing. Keep the same source key on replay. A REST list array or an intentionally selected alert is evidence,
 not proof that a past export was complete or nothing else is vulnerable.
 
 | GitHub field                     | Codex Security interpretation                                                                                                                                                      |

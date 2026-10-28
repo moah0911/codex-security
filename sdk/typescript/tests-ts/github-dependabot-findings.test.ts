@@ -73,9 +73,9 @@ test("extra metadata cannot hide a native alert or contradict its family", () =>
     expect(
       dependabotEvidenceRepositoryUrls(raw, occurrence.source_finding_id),
     ).toEqual(["https://github.com/example/project"]);
-    expect(() => dependabotEvidenceRepositoryUrls(raw, "forged")).toThrow(
-      /source finding ID/i,
-    );
+    expect(dependabotEvidenceRepositoryUrls(raw, "alert-2")).toEqual([
+      "https://github.com/example/project",
+    ]);
     for (const source of ["github-code-scanning", "github-security-advisory"]) {
       const contradictory = { ...raw, source };
       expect(() =>
@@ -160,6 +160,17 @@ test.each([
       );
   },
 );
+
+test("preserves a Git manifest path containing a literal backslash", () => {
+  const alert = githubDependabotAlert();
+  const path = "legacy\\client/package-lock.json";
+  alert.dependency.manifest_path = path;
+  for (const target of ["local", "cloud"] as const) {
+    const { findings } = normalizeGitHubDependabotAlerts(alert, target);
+    expect(findings[0]!.evidence.packages![0]!.manifest_path).toBe(path);
+    expect(findings[0]!.evidence.locations![0]!.path).toBe(path);
+  }
+});
 
 test.each(["open", "fixed", "dismissed", "auto_dismissed"])(
   "keeps %s as source state even for a withdrawn advisory",
@@ -339,6 +350,33 @@ test("checks the normalized occurrence ID against the original Dependabot alert"
     expect(
       dependabotEvidenceRepositoryUrls(unrelated, "unrelated-occurrence"),
     ).toEqual([]);
+  }
+});
+
+test("normalized callers may keep opaque IDs, REST links and partial metadata", () => {
+  for (const host of [
+    "github.com",
+    "tenant.ghe.com",
+    "git.example.test:8443",
+  ]) {
+    const alert = githubDependabotAlert(12, "example/project", host);
+    for (const url of [alert.url, alert.html_url]) {
+      for (const data of [
+        alert,
+        { security_vulnerability: alert.security_vulnerability },
+        undefined,
+      ])
+        expect(dependabotEvidenceRepositoryUrls(data, "alert-12", url)).toEqual(
+          [`https://${host}/example/project`],
+        );
+      expect(() =>
+        dependabotEvidenceRepositoryUrls(
+          { security_vulnerability: {}, number: 13 },
+          "alert-12",
+          url,
+        ),
+      ).toThrow(/alert number/i);
+    }
   }
 });
 

@@ -135,6 +135,40 @@ test("normalized local imports bind projected Dependabot occurrences to a single
   }
 });
 
+test("replaying normalized Dependabot evidence keeps the caller's stored ID", async () => {
+  const fixture = await localFindingsFixture({
+    remote: "https://github.com/example/project",
+  });
+  try {
+    const alert = githubDependabotAlert();
+    const selection = normalizeGitHubDependabotAlerts(alert, "local");
+    const finding = selection.findings[0]!;
+    finding.source_finding_id = "alert-1";
+    finding.evidence.url = alert.url;
+    const options = {
+      repository: fixture.repository,
+      provider: "github" as const,
+      sourceKey: "alerts",
+    };
+    const deps = { environment: fixture.environment };
+    const prepare = () =>
+      prepareNormalizedLocalImport(selection, options, deps);
+    expect((await (await prepare()).import()).counts.created).toBe(1);
+    finding.evidence.source_data = {
+      security_vulnerability: alert.security_vulnerability,
+    };
+    expect((await (await prepare()).import()).counts.updated).toBe(1);
+    expect((await (await prepare()).import()).counts.unchanged).toBe(1);
+    expect(
+      (await listLocalExternalFindings(options, deps)).map(
+        (row) => row.sourceFindingId,
+      ),
+    ).toEqual(["alert-1"]);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
 test("binds offline HTTP Enterprise alert URLs without changing the repository scheme", async () => {
   const repository = "git.example.test/example/project";
   const fixture = await localFindingsFixture({

@@ -42,15 +42,37 @@ function webIdentity(url: string) {
   const repository = `${match[3]}/${match[4]}`.toLowerCase();
   const origin = `${parsed.protocol}//${host}`;
   const number = match[5]!;
+  const apiBase = isGitHubCloudHost(parsed.hostname)
+    ? `https://api.${host}`
+    : `${origin}/api/v3`;
+  const repositoryUrl = `${origin}/${repository}`;
+  const apiRepo = `${apiBase}/repos/${repository}`;
   return {
     repository,
-    repositoryUrl: `${origin}/${repository}`,
-    sourceId: `${host}/${repository}/dependabot/${number}`,
-    apiBase: isGitHubCloudHost(parsed.hostname)
-      ? `https://api.${host}`
-      : `${origin}/api/v3`,
+    repositoryUrl,
+    apiRepo,
     number,
+    sourceId: `${host}/${repository}/dependabot/${number}`,
+    htmlUrl: `${repositoryUrl}/security/dependabot/${number}`,
+    apiUrl: `${apiRepo}/dependabot/alerts/${number}`,
   };
+}
+
+// Normalized SDK evidence may link to either REST or the web UI.
+function alertUrlIdentity(url: unknown) {
+  if (typeof url !== "string") return null;
+  const web = webIdentity(url);
+  if (web) return web;
+  const api =
+    /^(https?:\/\/)([^/?#@\\\s]+)\/(api\/v3\/)?repos\/([^/]+\/[^/]+)\/dependabot\/alerts\/([1-9]\d*)$/iu.exec(
+      url,
+    );
+  if (!api) return null;
+  const host = api[3] ? api[2] : api[2]!.replace(/^api\./iu, "");
+  const parsed = webIdentity(
+    `${api[1]}${host}/${api[4]}/security/dependabot/${api[5]}`,
+  );
+  return parsed?.apiUrl === url.toLowerCase() ? parsed : null;
 }
 
 function checkSourceFamily(alert: Record<string, unknown>) {
@@ -61,6 +83,39 @@ function checkSourceFamily(alert: Record<string, unknown>) {
     throw new Error(
       "Dependabot alert conflicts with its GitHub source family.",
     );
+}
+
+function checkNativeClaims(
+  alert: Record<string, unknown>,
+  occurrence: NonNullable<ReturnType<typeof webIdentity>>,
+) {
+  if ("number" in alert && alert["number"] !== Number(occurrence.number))
+    throw new Error(
+      "Dependabot alert number must match the repository alert URL.",
+    );
+  if (
+    ("url" in alert &&
+      text(alert["url"])?.toLowerCase() !== occurrence.apiUrl) ||
+    ("html_url" in alert &&
+      text(alert["html_url"])?.toLowerCase() !== occurrence.htmlUrl)
+  )
+    throw new Error(
+      "Dependabot API url and html_url must identify the same host, repository and alert number.",
+    );
+  if ("repository" in alert) {
+    const declared = record(alert["repository"], "Dependabot repository");
+    if (
+      text(declared["full_name"])?.toLowerCase() !== occurrence.repository ||
+      ("html_url" in declared &&
+        text(declared["html_url"])?.toLowerCase() !==
+          occurrence.repositoryUrl) ||
+      ("url" in declared &&
+        text(declared["url"])?.toLowerCase() !== occurrence.apiRepo)
+    )
+      throw new Error(
+        "Dependabot repository metadata conflicts with its alert URLs.",
+      );
+  }
 }
 
 function identity(alert: Record<string, unknown>) {
@@ -74,28 +129,13 @@ function identity(alert: Record<string, unknown>) {
     throw new Error(
       "Dependabot html_url must identify the repository and alert number.",
     );
-  const { repository, repositoryUrl, sourceId, apiBase } = parsed;
-  const apiRepo = `${apiBase}/repos/${repository}`;
-  if (
-    requiredText(alert["url"], "Dependabot API url").toLowerCase() !==
-    `${apiRepo}/dependabot/alerts/${number}`
-  )
-    throw new Error(
-      "Dependabot API url and html_url must identify the same host, repository and alert number.",
-    );
-  if ("repository" in alert) {
-    const declared = record(alert["repository"], "Dependabot repository");
-    if (
-      text(declared["full_name"])?.toLowerCase() !== repository ||
-      ("html_url" in declared &&
-        text(declared["html_url"])?.toLowerCase() !== repositoryUrl) ||
-      ("url" in declared && text(declared["url"])?.toLowerCase() !== apiRepo)
-    )
-      throw new Error(
-        "Dependabot repository metadata conflicts with its alert URLs.",
-      );
-  }
-  return { repositoryUrl, sourceId, url };
+  requiredText(alert["url"], "Dependabot API url");
+  checkNativeClaims(alert, parsed);
+  return {
+    repositoryUrl: parsed.repositoryUrl,
+    sourceId: parsed.sourceId,
+    url,
+  };
 }
 
 export function dependabotEvidenceRepositoryUrls(
@@ -103,13 +143,16 @@ export function dependabotEvidenceRepositoryUrls(
   expectedSourceFindingId?: string,
   projectedUrl?: string | null,
 ): string[] {
-  const native = isGitHubDependabotAlert(sourceData)
-    ? identity(sourceData)
-    : null;
-  const projected = projectedUrl ? webIdentity(projectedUrl) : null;
-  if (projected && !native && isRecord(sourceData))
-    checkSourceFamily(sourceData);
-  const occurrence = native ?? projected;
+  const native = isGitHubDependabotAlert(sourceData) ? sourceData : null;
+  const raw =
+    native &&
+    (alertUrlIdentity(native["html_url"]) ?? alertUrlIdentity(native["url"]));
+  const projected = alertUrlIdentity(projectedUrl);
+  const occurrence = raw ?? projected;
+  const structuredId =
+    /^[^/]+\/[^/]+\/[^/]+\/(?:dependabot|code-scanning|security-advisory)\//u.test(
+      expectedSourceFindingId ?? "",
+    );
   if (!occurrence) {
     if (
       expectedSourceFindingId &&
@@ -122,18 +165,21 @@ export function dependabotEvidenceRepositoryUrls(
       );
     return [];
   }
+  if (isRecord(sourceData)) checkSourceFamily(sourceData);
+  if (native) checkNativeClaims(native, occurrence);
+  // A caller may have stored this occurrence under an opaque ID before native imports existed.
   if (
-    expectedSourceFindingId !== undefined &&
+    (structuredId || expectedSourceFindingId === "") &&
     expectedSourceFindingId !== occurrence.sourceId
   )
     throw new CodexSecurityError(
       "The normalized source finding ID does not match the original Dependabot alert.",
     );
   if (
-    native &&
-    projectedUrl != null &&
-    (projected?.sourceId !== native.sourceId ||
-      projected.repositoryUrl !== native.repositoryUrl)
+    raw &&
+    projected &&
+    (projected.sourceId !== raw.sourceId ||
+      projected.repositoryUrl !== raw.repositoryUrl)
   )
     throw new CodexSecurityError(
       "The normalized alert URL does not match the original Dependabot alert.",
@@ -184,16 +230,19 @@ function evidence(alert: Record<string, unknown>, url: string) {
         "Dependabot dependency and matched vulnerability packages disagree.",
       );
   }
-  const rawPath = dependency["manifest_path"];
-  const path =
-    typeof rawPath === "string" && /^[a-z][a-z\d+.-]*:/iu.test(rawPath)
-      ? null
-      : relativePath(rawPath);
-  const filename = path?.split("/").at(-1);
-  if (rawPath != null && (!filename || filename === "."))
-    throw new Error(
-      "Dependabot manifest_path must identify a repository-relative file.",
-    );
+  const path = dependency["manifest_path"] ?? null;
+  if (path !== null) {
+    const filename = relativePath(path)?.split("/").at(-1);
+    if (
+      typeof path !== "string" ||
+      /^[a-z][a-z\d+.-]*:/iu.test(path) ||
+      !filename ||
+      filename === "."
+    )
+      throw new Error(
+        "Dependabot manifest_path must identify a repository-relative file.",
+      );
+  }
   const ghsa = requiredText(advisory["ghsa_id"], "Dependabot GHSA ID");
   if (!/^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/iu.test(ghsa))
     throw new Error("Dependabot security_advisory must identify a GHSA.");

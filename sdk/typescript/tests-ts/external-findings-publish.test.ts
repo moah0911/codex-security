@@ -299,6 +299,31 @@ test("Dependabot publishes on the existing GitHub provider and rejects foreign r
       )
     ).preview.requests,
   ).toHaveLength(1);
+  projected.findings[0]!.evidence.url = input.url;
+  projected.findings[0]!.evidence.source_data = {
+    security_vulnerability: input.security_vulnerability,
+  };
+  projected.findings[0]!.source_finding_id = "alert-1";
+  const compatible = await prepareNormalizedExternalPublication(
+    projected,
+    selection,
+    correct.deps,
+  );
+  expect((await compatible.publish()).counts.created).toBe(1);
+  expect(
+    (
+      await (
+        await prepareNormalizedExternalPublication(
+          projected,
+          selection,
+          correct.deps,
+        )
+      ).publish()
+    ).counts.unchanged,
+  ).toBe(1);
+  await expect(
+    prepareNormalizedExternalPublication(projected, selection, foreign.deps),
+  ).rejects.toThrow(/does not match/i);
   const conflicting = structuredClone(native);
   conflicting.findings[0]!.evidence.url = githubDependabotAlert(2).html_url;
   await expect(
