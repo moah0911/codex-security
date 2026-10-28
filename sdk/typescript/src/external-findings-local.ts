@@ -22,7 +22,7 @@ import type {
 } from "./external-import-models.js";
 import { parseGitRemote } from "./git-remote.js";
 import { isRecord } from "./record.js";
-import { dependabotEvidenceRepositoryUrls } from "./github-dependabot-findings.js";
+import { dependabotRepository } from "./github-dependabot-findings.js";
 import {
   bundledPluginRoot,
   canonicalConfigPath,
@@ -504,23 +504,18 @@ export async function prepareNormalizedLocalImport(
     identities.add(finding.source_finding_id);
     if (!isRecord(finding.evidence))
       throw new CodexSecurityError("Imported evidence must be an object.");
-    if (options.provider === "github") {
-      const claimed = finding.evidence.details?.repository?.url;
-      for (const native of dependabotEvidenceRepositoryUrls(
-        finding.evidence.source_data,
-        finding.source_finding_id,
-        finding.evidence.url,
-      )) {
-        if (
-          claimed &&
-          cloudRepositoryUrlKey(claimed) !== cloudRepositoryUrlKey(native)
-        )
-          throw new CodexSecurityError(
-            "The normalized repository does not match the original Dependabot alert.",
-          );
-        dependabotSources.add(native);
-      }
-    }
+    if (options.provider !== "github") continue;
+    const native = dependabotRepository(finding);
+    if (!native) continue;
+    const claimed = finding.evidence.details?.repository?.url;
+    if (
+      claimed &&
+      cloudRepositoryUrlKey(claimed) !== cloudRepositoryUrlKey(native)
+    )
+      throw new CodexSecurityError(
+        "The normalized repository does not match the original Dependabot alert.",
+      );
+    dependabotSources.add(native);
   }
   if (dependabotSources.size > 1)
     throw new CodexSecurityError(

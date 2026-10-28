@@ -3,7 +3,7 @@ import {
   type ExternalImportTarget,
   validateExternalEvidence,
 } from "./external-import-contract.js";
-import type { ExternalFindings } from "./external-findings.js";
+import type { ExternalFinding, ExternalFindings } from "./external-findings.js";
 import { isGitHubCloudHost } from "./git-remote.js";
 import { isRecord } from "./record.js";
 import { record, relativePath, requiredText, text } from "./scanner-import.js";
@@ -138,65 +138,49 @@ function identity(alert: Record<string, unknown>) {
   };
 }
 
-export function dependabotEvidenceRepositoryUrls(
-  sourceData: unknown,
-  expectedSourceFindingId?: string,
-  projectedUrl?: string | null,
-): string[] {
+export function dependabotRepository({
+  source_finding_id: id,
+  evidence: { source_data: sourceData, url },
+}: ExternalFinding): string | undefined {
   const native = isGitHubDependabotAlert(sourceData) ? sourceData : null;
   const raw =
     native &&
     (alertUrlIdentity(native["html_url"]) ?? alertUrlIdentity(native["url"]));
-  const projected = alertUrlIdentity(projectedUrl);
+  const projected = alertUrlIdentity(url);
   const occurrence = raw ?? projected;
   const structuredId =
     /^[^/]+\/[^/]+\/[^/]+\/(?:dependabot|code-scanning|security-advisory)\//u.test(
-      expectedSourceFindingId ?? "",
+      id,
     );
   if (!occurrence) {
-    if (
-      expectedSourceFindingId &&
-      /^[^/]+\/[^/]+\/[^/]+\/dependabot\/[1-9]\d*$/u.test(
-        expectedSourceFindingId,
-      )
-    )
+    if (/^[^/]+\/[^/]+\/[^/]+\/dependabot\/[1-9]\d*$/u.test(id))
       throw new CodexSecurityError(
         "The normalized Dependabot occurrence needs the original alert or its repository alert URL.",
       );
-    return [];
+    return;
   }
   if (isRecord(sourceData)) checkSourceFamily(sourceData);
   if (native) checkNativeClaims(native, occurrence);
   // A caller may have stored this occurrence under an opaque ID before native imports existed.
-  if (
-    (structuredId || expectedSourceFindingId === "") &&
-    expectedSourceFindingId !== occurrence.sourceId
-  )
+  if ((structuredId || id === "") && id !== occurrence.sourceId)
     throw new CodexSecurityError(
       "The normalized source finding ID does not match the original Dependabot alert.",
     );
-  if (
-    raw &&
-    projected &&
-    (projected.sourceId !== raw.sourceId ||
-      projected.repositoryUrl !== raw.repositoryUrl)
-  )
+  if (raw && projected && raw.htmlUrl !== projected.htmlUrl)
     throw new CodexSecurityError(
       "The normalized alert URL does not match the original Dependabot alert.",
     );
-  return [occurrence.repositoryUrl];
+  return occurrence.repositoryUrl;
 }
 
 function selectedAlerts(input: unknown) {
   const selection = Array.isArray(input) ? input : [input];
-  let rows: unknown[] = selection;
-  if (selection.some(Array.isArray)) {
-    if (!selection.every(Array.isArray))
-      throw new Error(
-        "Dependabot input must not mix alert records and page arrays.",
-      );
-    rows = selection.flat();
-  }
+  const hasPages = selection.some(Array.isArray);
+  if (hasPages && !selection.every(Array.isArray))
+    throw new Error(
+      "Dependabot input must not mix alert records and page arrays.",
+    );
+  const rows: unknown[] = hasPages ? selection.flat() : selection;
   if (!rows.every(isGitHubDependabotAlert))
     throw new Error(
       "Expected complete native Dependabot repository alerts, not mixed families, page shapes or API envelopes.",
@@ -279,54 +263,51 @@ function evidence(alert: Record<string, unknown>, url: string) {
   if (!Number.isFinite(updated) || updated < 0)
     throw new Error("Dependabot updated_at must be a valid timestamp.");
   const patch = vulnerability["first_patched_version"];
-  const fixed =
-    patch === null
-      ? []
-      : [
-          requiredText(
-            record(patch, "Dependabot first_patched_version")["identifier"],
-            "Dependabot patched version",
-          ),
-        ];
+  const fixedVersions: string[] = [];
+  if (patch !== null)
+    fixedVersions.push(
+      requiredText(
+        record(patch, "Dependabot first_patched_version")["identifier"],
+        "Dependabot patched version",
+      ),
+    );
   const severity = requiredText(
     vulnerability["severity"],
     "Dependabot matched severity",
   );
   if (!["critical", "high", "medium", "low"].includes(severity))
     throw new Error("Invalid Dependabot matched vulnerability severity.");
-  const aliases = Array.isArray(advisory["identifiers"])
-    ? advisory["identifiers"].flatMap((item) => {
-        const value = isRecord(item) ? text(item["value"]) : null;
-        if (
-          value &&
-          (item["type"] === "GHSA" || /^GHSA-/iu.test(value)) &&
-          value.toUpperCase() !== ghsa.toUpperCase()
-        )
-          throw new Error(
-            "Dependabot advisory identifiers disagree on the GHSA.",
-          );
-        return value === null ? [] : [value];
-      })
-    : [];
+  const advisoryIds = new Set([ghsa]);
+  const cve = text(advisory["cve_id"]);
+  if (cve) advisoryIds.add(cve);
+  const identifiers = advisory["identifiers"];
+  if (Array.isArray(identifiers)) {
+    for (const item of identifiers) {
+      const value = isRecord(item) && text(item["value"]);
+      if (!value) continue;
+      if (
+        (item["type"] === "GHSA" || /^GHSA-/iu.test(value)) &&
+        value.toUpperCase() !== ghsa.toUpperCase()
+      )
+        throw new Error(
+          "Dependabot advisory identifiers disagree on the GHSA.",
+        );
+      advisoryIds.add(value);
+    }
+  }
   return {
     title: requiredText(advisory["summary"], "Dependabot advisory summary"),
     description: text(advisory["description"]),
     severity,
     url,
-    advisory_ids: [
-      ...new Set(
-        [ghsa, text(advisory["cve_id"]), ...aliases].filter(
-          (value): value is string => value !== null,
-        ),
-      ),
-    ],
+    advisory_ids: [...advisoryIds],
     packages: [
       {
         name,
         ecosystem,
         manifest_path: path,
         vulnerable_version_range: range,
-        fixed_versions: fixed,
+        fixed_versions: fixedVersions,
       },
     ],
     locations: path ? [{ path }] : [],

@@ -1,16 +1,14 @@
 # Import GitHub Dependabot repository alerts
 
-A Dependabot alert identifies a vulnerable dependency in **one repository**.
-This is a different source from GitHub code scanning and from repository or
-global GHSA publications. A GHSA describes affected software; it does not by
-itself establish that your repository uses it.
+A Dependabot alert identifies a vulnerable dependency in one repository. Its GHSA
+describes the affected software. GitHub code scanning and published security
+advisories have separate import formats.
 
-## Export an authorized repository
+## Export one repository
 
-Use the official GitHub CLI and a fine-grained token or GitHub App installation
-with **Dependabot alerts: read** for the intended repository. Dependabot alerts
-must be available to the caller. The SDK reads a saved export offline: it does
-not fetch private alerts or reuse GitHub credentials for publication.
+Use a fine-grained token or GitHub App installation with **Dependabot alerts: read**
+for the repository. The GitHub CLI reads the alerts. Codex Security imports the
+saved file offline. Keep the export outside the checkout.
 
 ```bash
 set -eu
@@ -19,54 +17,45 @@ out=$(mktemp -d)
 gh api --hostname github.com --method GET --paginate \
   -H 'Accept: application/vnd.github+json' \
   -H 'X-GitHub-Api-Version: 2022-11-28' \
+  --jq 'if type == "array" then tojson else error("expected an alert page") end' \
   'repos/OWNER/REPO/dependabot/alerts?per_page=100' > "$out/pages.tmp"
-jq -e -s 'if length > 0 and all(.[]; type == "array")
-  then (add // []) else error("expected alert pages") end' \
-  "$out/pages.tmp" > "$out/alerts.tmp"
-mv "$out/alerts.tmp" "$out/dependabot.json"
+test -s "$out/pages.tmp"
+mv "$out/pages.tmp" "$out/dependabot.jsonl"
 ```
 
-Use your actual GitHub hostname and replace `OWNER/REPO` in both steps.
-Keep the export outside the checkout. Leave the state filter unset to include
-alerts that are currently fixed, dismissed, or auto-dismissed. Each record
-describes the alert at export time. `--paginate` follows GitHub's `Link` header
-across all pages. Keep the
-read and conversion as separate commands: a successful `jq` must not hide a
-failed request. A `403` or `404` is not an empty backlog.
+Replace the hostname and `OWNER/REPO` in both examples. The command follows every
+page and includes open, fixed, dismissed, and auto-dismissed alerts. Each line
+contains one page, including `[]` for an empty collection. If a request fails,
+check repository access before retrying.
 
 ## Preview and import
 
 ```bash
 export CODEX_SECURITY_ENABLE_EXTERNAL_IMPORTS=1
-codex-security publish findings "$out/dependabot.json" \
+codex-security publish findings "$out/dependabot.jsonl" \
   --to local --repository ./project --provider github \
   --source-key github.com/OWNER/REPO/dependabot --dry-run --format json
 ```
 
-Review the destination, ready records and exclusions, then remove `--dry-run`.
-For Cloud use an authorized repository ID or URL with `--to cloud`. For a local
-checkout with recognizable network remotes, the alert repository must match one
-of them. If the checkout has no such remote (for example, it uses only filesystem
-paths or `file://` URLs), verify that the export belongs to the checkout before
-importing. Keep the same source key on replay. A REST list array or an intentionally selected alert is evidence,
-not proof that a past export was complete or nothing else is vulnerable.
+Review the destination, ready records, and exclusions, then remove `--dry-run`.
+Use `--to cloud` with an authorized repository ID or URL for Cloud publication.
+For a local checkout, the alert repository must match a configured network
+remote when one is available. If the checkout has only filesystem remotes or
+no remote, verify the export belongs to it before importing.
 
-| GitHub field                     | Codex Security interpretation                                                                                                                                                      |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Repository alert URL and number  | A source occurrence scoped to host, repository and Dependabot. Two alert numbers referencing the same GHSA remain distinct.                                                        |
-| Dependency and manifest path     | Reported package, ecosystem and safe repository-relative manifest path; not a vulnerable line of code.                                                                             |
-| Matched `security_vulnerability` | Vulnerable version range and first patched version, when present. A manifest constraint is not an installed version; the advisory's other affected packages are not findings here. |
-| Advisory identifiers             | GHSA/CVE aliases and vendor evidence, not the source occurrence ID.                                                                                                                |
-| State and timestamps             | GitHub's reported state and timestamps at export. `dismissed` or `fixed` is not a Codex assessment. Omission from a later selection does not delete an occurrence.                 |
+Keep the export and reuse its source key for the same repository. The host,
+repository, and alert number identify an occurrence. Two alerts for the same
+GHSA keep separate histories. A later selection updates the alerts it includes
+and leaves omitted alerts in place.
+
+Each finding records the matched package, ecosystem, manifest path, vulnerable
+version range, first patched version when available, and advisory IDs. The
+native alert retains GitHub’s state and timestamps. An alert identifies a
+manifest dependency without establishing the installed version, an affected
+line, or a Codex assessment. The importer rejects conflicts between alert
+identities, affected packages, or ranges, and requires repository-relative
+manifest paths.
 
 Read local evidence with `codex-security findings imported ./project --format json`.
-The embedded GHSA is not a disclosure published by the consumer repository.
-The importer keeps its source status and advisory details in the native alert
-instead of classifying the alert itself as a repository-published advisory.
-It rejects conflicting alert identities, advisory packages or ranges, and
-manifest URIs; an additional vendor field cannot override the native source.
-For large repositories, keep the export for replay and do not combine multiple
-repositories under one source key or destination.
-
-References: [GitHub REST repository Dependabot alerts](https://docs.github.com/en/rest/dependabot/alerts#list-dependabot-alerts-for-a-repository),
-[GitHub CLI API and pagination](https://cli.github.com/manual/gh_api).
+See the [GitHub Dependabot alerts endpoint](https://docs.github.com/en/rest/dependabot/alerts#list-dependabot-alerts-for-a-repository)
+and the [GitHub CLI pagination options](https://cli.github.com/manual/gh_api).

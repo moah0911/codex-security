@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { expect, test } from "bun:test";
 import {
-  dependabotEvidenceRepositoryUrls,
+  dependabotRepository,
   normalizeGitHubDependabotAlerts,
 } from "../src/github-dependabot-findings.js";
 import {
@@ -19,6 +19,22 @@ import {
   removeTemporaryDirectory,
   temporaryDirectory,
 } from "./support/temporary-directories.js";
+
+function retainedRepository(
+  source_data: unknown,
+  source_finding_id = "opaque",
+  url?: string | null,
+) {
+  return dependabotRepository({
+    source_finding_id,
+    evidence: {
+      title: "Example",
+      severity: "unknown",
+      url,
+      source_data: source_data as Record<string, unknown> | undefined,
+    },
+  });
+}
 
 test("matches the affected dependency, retains the original alert, and never invents an installed version or revision", () => {
   const alert = githubDependabotAlert();
@@ -70,20 +86,18 @@ test("extra metadata cannot hide a native alert or contradict its family", () =>
     const occurrence = normalizeGitHubDependabotAlerts(raw, target)
       .findings[0]!;
     expect(occurrence.evidence.source_data).toEqual(raw);
-    expect(
-      dependabotEvidenceRepositoryUrls(raw, occurrence.source_finding_id),
-    ).toEqual(["https://github.com/example/project"]);
-    expect(dependabotEvidenceRepositoryUrls(raw, "alert-2")).toEqual([
+    expect(dependabotRepository(occurrence)).toBe(
       "https://github.com/example/project",
-    ]);
+    );
+    expect(retainedRepository(raw, "alert-2")).toBe(
+      "https://github.com/example/project",
+    );
     for (const source of ["github-code-scanning", "github-security-advisory"]) {
       const contradictory = { ...raw, source };
       expect(() =>
         normalizeGitHubDependabotAlerts(contradictory, target),
       ).toThrow(/family/i);
-      expect(() => dependabotEvidenceRepositoryUrls(contradictory)).toThrow(
-        /family/i,
-      );
+      expect(() => retainedRepository(contradictory)).toThrow(/family/i);
     }
   }
 });
@@ -214,12 +228,9 @@ test("retains raw repository, status and CWEs without treating the alert as a GH
       .findings[0]!;
     expect(finding.evidence).not.toHaveProperty("details");
     expect(finding.evidence.source_data).toEqual(selected);
-    expect(
-      dependabotEvidenceRepositoryUrls(
-        finding.evidence.source_data,
-        finding.source_finding_id,
-      ),
-    ).toEqual(["https://git.example.test:8443/example/project"]);
+    expect(dependabotRepository(finding)).toBe(
+      "https://git.example.test:8443/example/project",
+    );
     expect(finding.evidence.packages![0]!.installed_version).toBeNull();
     for (const scope of ["repository", "global"] as const) {
       const disclosure = normalizeGitHubAdvisories(
@@ -285,9 +296,7 @@ test.each([
     url: alert.url.replace(/\/dependabot\/alerts\/17$/, ""),
   };
   const row = { ...alert, repository: declared };
-  expect(dependabotEvidenceRepositoryUrls(row)).toEqual([
-    `https://${host}/example/project`,
-  ]);
+  expect(retainedRepository(row)).toBe(`https://${host}/example/project`);
   expect(
     normalizeGitHubDependabotAlerts(row).findings[0]!.source_finding_id,
   ).toBe(`${host}/example/project/dependabot/17`);
@@ -310,7 +319,7 @@ test.each([
     },
     { ...row, repository: { ...declared, url: declared.url + "/other" } },
   ])
-    expect(() => dependabotEvidenceRepositoryUrls(bad)).toThrow();
+    expect(() => retainedRepository(bad)).toThrow();
 });
 
 test("checks the normalized occurrence ID against the original Dependabot alert", () => {
@@ -321,9 +330,9 @@ test("checks the normalized occurrence ID against the original Dependabot alert"
   );
   const finding = normalizeGitHubDependabotAlerts(alert).findings[0]!;
   const raw = finding.evidence.source_data;
-  expect(
-    dependabotEvidenceRepositoryUrls(raw, finding.source_finding_id),
-  ).toEqual(["https://git.example.test:443/example/project"]);
+  expect(dependabotRepository(finding)).toBe(
+    "https://git.example.test:443/example/project",
+  );
   for (const wrong of [
     "github.com/example/project/dependabot/17",
     "git.example.test/example/project/dependabot/17",
@@ -332,12 +341,12 @@ test("checks the normalized occurrence ID against the original Dependabot alert"
     "git.example.test:443/example/project/dependabot/18",
     "",
   ])
-    expect(() => dependabotEvidenceRepositoryUrls(raw, wrong)).toThrow(
+    expect(() => retainedRepository(raw, wrong)).toThrow(
       /source finding ID.*original Dependabot alert/i,
     );
   for (const unrelated of [importedAlert(), importedAdvisory()]) {
     expect(() =>
-      dependabotEvidenceRepositoryUrls(
+      retainedRepository(
         unrelated,
         finding.source_finding_id,
         finding.evidence.url,
@@ -345,11 +354,11 @@ test("checks the normalized occurrence ID against the original Dependabot alert"
     ).toThrow(/source family/i);
 
     expect(() =>
-      dependabotEvidenceRepositoryUrls(unrelated, finding.source_finding_id),
+      retainedRepository(unrelated, finding.source_finding_id),
     ).toThrow();
     expect(
-      dependabotEvidenceRepositoryUrls(unrelated, "unrelated-occurrence"),
-    ).toEqual([]);
+      retainedRepository(unrelated, "unrelated-occurrence"),
+    ).toBeUndefined();
   }
 });
 
@@ -366,11 +375,11 @@ test("normalized callers may keep opaque IDs, REST links and partial metadata", 
         { security_vulnerability: alert.security_vulnerability },
         undefined,
       ])
-        expect(dependabotEvidenceRepositoryUrls(data, "alert-12", url)).toEqual(
-          [`https://${host}/example/project`],
+        expect(retainedRepository(data, "alert-12", url)).toBe(
+          `https://${host}/example/project`,
         );
       expect(() =>
-        dependabotEvidenceRepositoryUrls(
+        retainedRepository(
           { security_vulnerability: {}, number: 13 },
           "alert-12",
           url,
@@ -411,7 +420,7 @@ test("rejects credential-bearing links, foreign API origins, and repo traversal"
     {},
     null,
   ])
-    expect(dependabotEvidenceRepositoryUrls(unrelated)).toEqual([]);
+    expect(retainedRepository(unrelated)).toBeUndefined();
 });
 
 test("handles unambiguous slurped arrays and rejects incomplete page or record shapes", () => {
@@ -509,6 +518,7 @@ test("file reader dispatches native lists, selected JSONL and gzip while preserv
     for (const data of [
       JSON.stringify(alerts),
       alerts.map((item) => JSON.stringify(item)).join("\n"),
+      alerts.map((item) => JSON.stringify([item])).join("\n"),
       gzipSync(JSON.stringify(alerts.map((item) => [item]))),
     ]) {
       await writeFile(file, data);

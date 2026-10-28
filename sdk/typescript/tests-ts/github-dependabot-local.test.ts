@@ -27,23 +27,22 @@ test("two Dependabot alerts for one advisory retain separate repository historie
       await writeFile(path, gzipSync(JSON.stringify(findings)));
       return prepareLocalExternalImport(path, options, dependencies);
     };
+    const importCounts = async (alerts: unknown[]) => {
+      const prepared = await prepare(alerts);
+      return (await prepared.import()).counts;
+    };
     const first = { ...githubDependabotAlert(1), source: "extra" };
     const second = githubDependabotAlert(2);
     const saved = await prepare([first, second]);
     expect((await saved.import()).counts.created).toBe(2);
-    expect(
-      (await (await prepare([second, first])).import()).counts.unchanged,
-    ).toBe(2);
-    expect(
-      (
-        await (
-          await prepare([
-            { ...first, state: "fixed", fixed_at: "2026-01-03T00:00:00Z" },
-          ])
-        ).import()
-      ).counts.updated,
-    ).toBe(1);
-    expect((await (await prepare([])).import()).counts).toEqual({
+    expect((await importCounts([second, first])).unchanged).toBe(2);
+    const fixed = {
+      ...first,
+      state: "fixed",
+      fixed_at: "2026-01-03T00:00:00Z",
+    };
+    expect((await importCounts([fixed])).updated).toBe(1);
+    expect(await importCounts([])).toEqual({
       created: 0,
       updated: 0,
       unchanged: 0,
@@ -53,11 +52,11 @@ test("two Dependabot alerts for one advisory retain separate repository historie
     expect(
       records.every(({ assessment }) => assessment.state === "not_assessed"),
     ).toBe(true);
-    await expect(
-      prepare([
-        { ...githubDependabotAlert(3, "example/other"), source: "extra" },
-      ]),
-    ).rejects.toThrow(/remote|repository/i);
+    const other = {
+      ...githubDependabotAlert(3, "example/other"),
+      source: "extra",
+    };
+    await expect(prepare([other])).rejects.toThrow(/configured remote/);
     const altered = structuredClone(saved.preview);
     altered.findings[0]!.evidence.details = {
       kind: "sast",
@@ -73,21 +72,10 @@ test("two Dependabot alerts for one advisory retain separate repository historie
     await expect(
       prepareNormalizedLocalImport(relabeled, options, dependencies),
     ).rejects.toThrow(/occurrence|source finding|identity|alert ID/i);
-    const foreign = structuredClone(saved.preview);
-    foreign.findings.splice(1);
-    foreign.findings[0]!.source_finding_id =
-      "github.com/example/other/dependabot/3";
-    foreign.findings[0]!.evidence.url = githubDependabotAlert(
-      3,
-      "example/other",
-    ).html_url;
-    foreign.findings[0]!.evidence.source_data = {
-      ...githubDependabotAlert(3, "example/other"),
-      source: "extra",
-    };
+    const foreign = normalizeGitHubDependabotAlerts(other, "local");
     await expect(
       prepareNormalizedLocalImport(foreign, options, dependencies),
-    ).rejects.toThrow(/remote|repository/i);
+    ).rejects.toThrow(/configured remote/);
     expect(await listLocalExternalFindings(options, dependencies)).toEqual(
       records,
     );
@@ -151,14 +139,20 @@ test("replaying normalized Dependabot evidence keeps the caller's stored ID", as
       sourceKey: "alerts",
     };
     const deps = { environment: fixture.environment };
-    const prepare = () =>
-      prepareNormalizedLocalImport(selection, options, deps);
-    expect((await (await prepare()).import()).counts.created).toBe(1);
+    const importCounts = async () => {
+      const prepared = await prepareNormalizedLocalImport(
+        selection,
+        options,
+        deps,
+      );
+      return (await prepared.import()).counts;
+    };
+    expect((await importCounts()).created).toBe(1);
     finding.evidence.source_data = {
       security_vulnerability: alert.security_vulnerability,
     };
-    expect((await (await prepare()).import()).counts.updated).toBe(1);
-    expect((await (await prepare()).import()).counts.unchanged).toBe(1);
+    expect((await importCounts()).updated).toBe(1);
+    expect((await importCounts()).unchanged).toBe(1);
     expect(
       (await listLocalExternalFindings(options, deps)).map(
         (row) => row.sourceFindingId,
