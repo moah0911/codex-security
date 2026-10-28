@@ -263,9 +263,8 @@ Generated PRs leave the disclosure attestations unchecked for maintainer review.
 3. Summarize the changes a user will notice. Call out required migration or
    compatibility work, link relevant public documentation, and leave the
    pull-request inventory to the generated section.
-   The release maintainer checks the [published Codex Security docs](https://learn.chatgpt.com/docs/security)
-   against the release highlights and upgrade notes. If a guide or example
-   needs to change, the maintainer prepares a docs PR.
+   The release maintainer checks the [published guides and examples](https://learn.chatgpt.com/docs/security)
+   against the highlights and upgrade notes and prepares a docs PR for any that need updating.
 4. Open a pull request with a strict Conventional Commit title such as
    `chore(release): 0.2.0`.
 5. Run the checks required by the changed files and record the initial results
@@ -441,8 +440,8 @@ Check the published state before announcing the release:
   Historical releases may have generated notes only.
 - Every merged pull request is included or has an intentional
   `skip-release-notes` label.
-- Once the version described in the docs is available, the release maintainer
-  publishes any prepared updates and verifies the changed instructions on the live site.
+- Once the documented version ships, publish any prepared docs updates and
+  verify the changed instructions on the live site.
 
 The `published-install-smoke` workflow checks each exact version during release
 publication. It also checks npm's current `latest` daily and on pull requests
