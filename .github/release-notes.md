@@ -5,6 +5,7 @@
 ## Highlights
 
 - preserve hyphens in scan directory names ([#2102](https://github.com/openai/codex-security/pull/2102))
+- add ServiceNow AVIT CSV export ([#2103](https://github.com/openai/codex-security/pull/2103))
 
 <!-- release-section: highlights:end -->
 
