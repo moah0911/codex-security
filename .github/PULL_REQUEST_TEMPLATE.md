@@ -7,6 +7,8 @@
 ## Changes
 
 <!-- Summarize the specific changes that reviewers should understand. -->
+<!-- If the published docs (https://learn.chatgpt.com/docs/security) need an update,
+you can name the page or workflow and suggest what should change. Maintainers handle website updates. -->
 
 ## Testing
 

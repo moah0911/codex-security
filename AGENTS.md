@@ -87,6 +87,14 @@ variables, and defaults as public API.
 - Update relevant help, schemas, documentation, and tests in the same change.
   Describe the public CLI change in the pull request.
 
+## Published documentation
+
+When a change affects how developers use the CLI, SDK, or plugin, update the
+relevant docs and examples in this repository. If the
+[published Codex Security docs](https://learn.chatgpt.com/docs/security) also
+need an update, you can name the affected page or workflow in the pull request
+and describe what should change. Maintainers handle website updates.
+
 ## Pull request labels
 
 - Use existing labels only when they convey release behavior, dependency updates,
